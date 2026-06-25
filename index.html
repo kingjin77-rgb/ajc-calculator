@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="ko" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>아파트 체감 총 분양가 계산기 | 아정청</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Alpine.js Application Logic -->
+    <script>
+        function calcApp() {
+            return {
+                // States
+                aptName: '고덕국제신도시 수자인하우스디 84A',
+                sizeType: 'under85', // under85, over85
+                basicPrice: 558000000,
+                balconyPrice: 13200000,
+                airconPrice: 6500000,
+                appliancePrice: 8400000,
+                interiorPrice: 12500000,
+                
+                // Naver Cafe & Hosting Share Settings
+                appUrl: 'https://ajc-calculator.netlify.app', 
+                customApiKey: '', // 사용자가 외부 웹에 올렸을 때 입력할 개인 제미나이 API 키
+                adminOpen: false, // 관리자 설정 모달 오픈 여부
+                
+                // Dynamic Options
+                customOptions: [],
+                
+                // Financing (Middle loan)
+                interestType: 'later', // free, later
+                interestRate: 4.2,
+                loanMonths: 24,
+                guaranteeFeeRate: 0.05,
+                totalInterest: 0, 
+                
+                // Auto calculated tax & duties
+                taxRate: 1.1,
+                taxAmount: 0,
+                stampDuty: 150000,
+                bondFee: 450000,
+                legalFee: 800000,
+                aptUnionFee: 200000,
+                
+                // Results
+                extraTotalCost: 0,
+                realTotalCost: 0,
+                extraPercentage: 0,
+                
+                // Cashflow steps
+                contractCash: 0,
+                middleCash: 0,
+                remainingCash: 0,
+
+                // Toast status
+                toastShow: false,
+                toastTitle: '',
+                toastMsg: '',
+
+                // Gemini AI States
+                aiLoading: false,
+                aiResponse: '',
+                aiError: '',
+
+                init() {
+                    this.calcAll();
+                },
+
+                // Add customized option row
+                addCustomOption() {
+                    this.customOptions.push({ name: '추가 옵션', price: 1000000 });
+                    this.calcAll();
+                },
+
+                removeCustomOption(index) {
+                    this.customOptions.splice(index, 1);
+                    this.calcAll();
+                },
+
+                resetOptions() {
+                    this.balconyPrice = 0;
+                    this.airconPrice = 0;
+                    this.appliancePrice = 0;
+                    this.interiorPrice = 0;
+                    this.customOptions = [];
+                    this.calcAll();
+                    this.showToast('옵션 리셋 완료', '모든 추가 옵션 비용이 초기화되었습니다.');
+                },
+
+                // Total calculations
+                calcAll() {
+                    const basic = Number(this.basicPrice || 0);
+                    const balcony = Number(this.balconyPrice || 0);
+                    const aircon = Number(this.airconPrice || 0);
+                    const appliance = Number(this.appliancePrice || 0);
+                    const interior = Number(this.interiorPrice || 0);
+                    const intRate = Number(this.interestRate || 0);
+                    const months = Number(this.loanMonths || 0);
+                    const guarRate = Number(this.guaranteeFeeRate || 0);
+                    const legal = Number(this.legalFee || 0);
+                    const union = Number(this.aptUnionFee || 0);
+
+                    // 1. Sum up options safely
+                    let optionsSum = balcony + aircon + appliance + interior;
+                    this.customOptions.forEach(opt => {
+                        optionsSum += Number(opt.price || 0);
+                    });
+
+                    // 2. Acquisition Tax calculation
+                    const taxBase = basic + optionsSum;
+                    
+                    if (taxBase <= 600000000) {
+                        this.taxRate = 1.0;
+                    } else if (taxBase <= 900000000) {
+                        const rate = (taxBase * (2 / 300000000) - 3);
+                        this.taxRate = Number(rate.toFixed(2));
+                    } else {
+                        this.taxRate = 3.0;
+                    }
+
+                    let totalTaxPercent = this.taxRate * 1.1;
+                    
+                    if (this.sizeType === 'over85') {
+                        totalTaxPercent += 0.2;
+                    }
+                    
+                    this.taxAmount = Math.floor(taxBase * (totalTaxPercent / 100));
+
+                    // 3. Stamp duty matching by price ranges
+                    if (basic <= 50000000) {
+                        this.stampDuty = 0;
+                    } else if (basic <= 100000000) {
+                        this.stampDuty = 70000;
+                    } else if (basic <= 1000000000) {
+                        this.stampDuty = 150000;
+                    } else {
+                        this.stampDuty = 350000;
+                    }
+
+                    // Bond Fee estimation
+                    this.bondFee = Math.floor(basic * 0.0008);
+
+                    // 4. Middle loan interest calculation
+                    let calculatedInterest = 0;
+                    if (this.interestType === 'later') {
+                        const singlePayment = basic * 0.1;
+                        const monthlyRate = (intRate / 100) / 12;
+                        const stepMonths = months / 6;
+
+                        for (let i = 1; i <= 6; i++) {
+                            const remainingMonths = months - ((i - 1) * stepMonths);
+                            calculatedInterest += (singlePayment * monthlyRate * remainingMonths);
+                        }
+                    }
+                    this.totalInterest = Math.floor(calculatedInterest);
+
+                    const totalGuaranty = this.interestType === 'later' ? Math.floor((basic * 0.6) * (guarRate / 100) * (months / 12)) : 0;
+
+                    this.extraTotalCost = optionsSum + this.totalInterest + totalGuaranty + this.taxAmount + this.stampDuty + this.bondFee + legal + union;
+                    this.realTotalCost = basic + this.extraTotalCost;
+                    this.extraPercentage = basic > 0 ? ((this.extraTotalCost / basic) * 100).toFixed(1) : 0;
+
+                    this.contractCash = Math.floor(basic * 0.1) + Math.floor(optionsSum * 0.1);
+                    this.middleCash = Math.floor(basic * 0.6);
+                    this.remainingCash = Math.floor(basic * 0.3) + Math.floor(optionsSum * 0.9) + this.totalInterest + totalGuaranty + this.taxAmount + this.stampDuty + this.bondFee + legal + union;
+                },
+
+                // CALL GEMINI 2.5 FLASH API
+                async getAiAnalysis() {
+                    this.aiLoading = true;
+                    this.aiError = '';
+                    this.aiResponse = '';
+                    
+                    const systemApiKey = ""; // Injected dynamically at runtime inside preview
+                    const keyToUse = this.customApiKey.trim() ? this.customApiKey.trim() : systemApiKey;
+                    
+                    if (!keyToUse) {
+                        this.aiError = '⚠️ 현재 AI 정밀 분석 서비스 점검 중입니다. 일반 수식 계산 및 엑셀 저장 기능은 정상 작동하오니 자금 시뮬레이션을 계속 이용해 주세요.';
+                        this.aiLoading = false;
+                        return;
+                    }
+
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${keyToUse}`;
+                    const systemPrompt = "당신은 대한민국 최고 권위의 아파트 분양 분석가이자 부동산 전문 AI 컨설턴트인 '아정청 AI 닥터'입니다. 사용자가 산출한 실제 체감 총 분양가와 가용 자금 현황을 분석하여, 공급가 대비 추가 지출 비율이 적절한지, 현금 흐름에 문제가 없는지(계약금 및 최종 잔금 단계) 분석하고 전문적이고 친근한 충고를 포함하여 세련된 한국어로 진단 리포트를 작성해 줍니다.";
+                    
+                    let customOptsText = '';
+                    this.customOptions.forEach(opt => {
+                        customOptsText += `\n  - ${opt.name}: ${this.formatNumber(opt.price)}원`;
+                    });
+
+                    const userQuery = `
+                      [청약 단지 기본 정보]
+                      - 단지명: ${this.aptName}
+                      - 분양면적형: ${this.sizeType === 'under85' ? '85㎡ 이하 (국민평형 이하)' : '85㎡ 초과 대형평형'}
+                      - 기본 분양가: ${this.formatNumber(this.basicPrice)}원
+                      
+                      [추가 옵션 세부 내역]
+                      - 발코니 확장비: ${this.formatNumber(this.balconyPrice)}원
+                      - 시스템 에어컨: ${this.formatNumber(this.airconPrice)}원
+                      - 빌트인 가전: ${this.formatNumber(this.appliancePrice)}원
+                      - 인테리어/마감재: ${this.formatNumber(this.interiorPrice)}원${customOptsText}
+                      
+                      [금융 및 세금 취득 비용]
+                      - 중도금 대출 금리 형태: ${this.interestType === 'later' ? `이자가산 후불제 (평균 금리 ${this.interestRate}%, 대출 보증 수수료율 ${this.guaranteeFeeRate}%)` : '무이자 대출 적용'}
+                      - 산정된 총 금융 이자 비용: ${this.formatNumber(this.totalInterest)}원
+                      - 세금 취득세액 (요율 ${this.taxRate}%): ${this.formatNumber(this.taxAmount)}원
+                      
+                      [최종 현금 계산 결과]
+                      - 최종 체감 분양가 (진짜 취득원가): ${this.formatNumber(this.realTotalCost)}원
+                      - 겉보기 공급가 대비 추가 발생한 비용 금액: ${this.formatNumber(this.extraTotalCost)}원 (${this.extraPercentage}% 폭증)
+                      - 계약 시 당장 조달해야 하는 순수 현금 흐름 (계약금 10% + 옵션 계약금 10%): ${this.formatNumber(this.contractCash)}원
+                      - 입주지정일 최종 정산 단계에서 확보해야 하는 최종 정산금액 (잔금 30% + 옵션 90% + 취득세/인지세 + 후불이자 등): ${this.formatNumber(this.remainingCash)}원
+
+                      위 계산 결과를 토대로, 
+                      1) 공급 분양가 대비 추가 비용 비율(${this.extraPercentage}%)이 부동산 자금 계획상 안전한 수준인지 정밀하게 평가해 주세요.
+                      2) 계약 즉시 조달해야 하는 계약금과 입주 시에 치러야 할 잔금 현금 흐름을 맞춤형 분석하여 어떤 방식으로 자금을 마련해야 안전한지 전문가적인 자금 가이드를 주십시오.
+                      3) 마지막에 청약 예비 당첨자 또는 도전자들을 위한 따뜻하고 힘이 되는 '아정청 팁 한 줄' 조언을 작성해 주세요. (가독성이 좋도록 깔끔한 볼드(**)와 단락 분리를 활용해 한글로 생성해 주세요.)
+                    `;
+
+                    const payload = {
+                        contents: [{
+                            parts: [{ text: userQuery }]
+                        }],
+                        systemInstruction: {
+                            parts: [{ text: systemPrompt }]
+                        }
+                    };
+
+                    const fetchWithRetry = async (url, options, retries = 5, delay = 1000) => {
+                        try {
+                            const response = await fetch(url, options);
+                            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                            return await response.json();
+                        } catch (error) {
+                            if (retries <= 1) throw error;
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            return fetchWithRetry(url, options, retries - 1, delay * 2);
+                        }
+                    };
+
+                    try {
+                        const result = await fetchWithRetry(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if (text) {
+                            this.aiResponse = text;
+                            this.showToast('AI 맞춤 리포트 완료', '아정청 AI가 계산 결과를 면밀하게 정밀 진단했습니다.');
+                        } else {
+                            throw new Error('Invalid response structure');
+                        }
+                    } catch (err) {
+                        this.aiError = '현재 인공지능 분석 연동이 원활하지 않습니다. 잠시 후 [다시 진단받기]를 눌러주세요.';
+                        this.showToast('AI 연결 지연', '리포트 요청을 다시 한 번 시도해 주세요.');
+                    } finally {
+                        this.aiLoading = false;
+                    }
+                },
+
+                // Markdown formatter helper to display styled text inside DOM
+                formatMarkdown(text) {
+                    if (!text) return '';
+                    return text
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+                        .replace(/`([^`]+)`/g, '<code class="bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded text-xs font-mono font-bold">$1</code>')
+                        .replace(/\n/g, '<br>');
+                },
+
+                // COPY CALCULATION RESULTS FOR NAVER CAFE MEMBERS (User Facing Share Feature)
+                copyForNaverCafe() {
+                    let optionBreakdown = `  - 발코니 확장비: ${this.formatNumber(this.balconyPrice)}원\n  - 시스템 에어컨: ${this.formatNumber(this.airconPrice)}원\n  - 빌트인 가전 옵션: ${this.formatNumber(this.appliancePrice)}원\n  - 인테리어/마감재: ${this.formatNumber(this.interiorPrice)}원`;
+                    
+                    this.customOptions.forEach(opt => {
+                        optionBreakdown += `\n  - ${opt.name}: ${this.formatNumber(opt.price)}원`;
+                    });
+
+                    const financeText = this.interestType === 'later'
+                        ? `  - 중도금 대출 이자 (후불제 ${this.interestRate}%, ${this.loanMonths}개월): 약 ${this.formatNumber(this.totalInterest)}원`
+                        : `  - 중도금 대출 무이자 적용 (0원)`;
+
+                    const formattedShareText = `🏡 [아정청] 내가 계산한 내 아파트 체감 총 분양가 분석표
+
+📌 아파트 단지명: ${this.aptName}
+──────────────────────────────
+1️⃣ 기본 공급 분양가: ${this.formatNumber(this.basicPrice)}원
+   (${this.formatKoreanWon(this.basicPrice)})
+
+2️⃣ 추가 옵션 총액: ${this.formatNumber(this.balconyPrice + this.airconPrice + this.appliancePrice + this.interiorPrice)}원
+${optionBreakdown}
+
+3️⃣ 예상 금융 비용 (중도금 대출):
+${financeText}
+
+4️⃣ 취득세 및 부대비용: ${this.formatNumber(this.taxAmount + this.stampDuty + this.bondFee + this.legalFee + this.aptUnionFee)}원
+  - 예상 취득세율: ${this.taxRate}% (약 ${this.formatNumber(this.taxAmount)}원)
+  - 정부 수입인지세: ${this.formatNumber(this.stampDuty)}원
+
+──────────────────────────────
+✨ [최종 취득원가] 진짜 체감 분양가: ${this.formatNumber(this.realTotalCost)}원
+   (${this.formatKoreanWon(this.realTotalCost)})
+   📢 기본 공급가 대비 부대비용 [ ${this.extraPercentage}% ] 추가 부담!
+
+💡 단계별 현금 흐름 계획
+- 계약금 단계 (계약금 10% + 옵션 10%): ${this.formatNumber(this.contractCash)}원
+- 중도금 단계 (자력 납부 시 60%): ${this.formatNumber(this.middleCash)}원
+- 입주/잔금 단계 (잔금 30% + 옵션 90% + 후불이자 + 취득세): ${this.formatNumber(this.remainingCash)}원
+
+출처: 아정청 | 아파트 정직한 청약 (체감 분양가 계산기)
+──────────────────────────────`;
+
+                    this.executeCopy(formattedShareText);
+                    this.showToast('카페 공유 양식 복사 성공', '클립보드에 깔끔한 글 양식이 복사되었습니다. 네이버 카페 글쓰기 창에 붙여넣으세요!');
+                },
+
+                // NAVER CAFE SHARE - 1. Open Naver Share Window
+                shareToNaverCafe() {
+                    const title = `🏡 [아정청 공식] 내가 직접 두드려보는 진짜 내 집 취득세/이자 체감 분양가 계산기!`;
+                    const naverShareUrl = `https://share.naver.com/web/shareView?url=${encodeURIComponent(this.appUrl)}&title=${encodeURIComponent(title)}`;
+                    window.open(naverShareUrl, 'naverShare', 'width=600,height=600,scrollbars=yes,resizable=yes');
+                    this.showToast('네이버 공유 창 오픈', '카페나 블로그로 계산기 링크를 보낼 수 있는 팝업창이 열렸습니다.');
+                },
+
+                // NAVER CAFE SHARE - 2. Copy Iframe Widget Code for Sidebar or Cafe Main
+                copyIframeCode() {
+                    const iframeCode = `<iframe src="${this.appUrl}" width="100%" height="850px" frameborder="0" scrolling="no" style="border:none; border-radius:16px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,0.08);"></iframe>`;
+                    this.executeCopy(iframeCode);
+                    this.showToast('위젯 소스코드 복사 성공', '카페 사이드바/대문 등록용 Iframe 태그가 복사되었습니다.');
+                },
+
+                // NAVER CAFE SHARE - 3. Copy visual promotional banner card HTML (Safe for smart editor HTML paste)
+                copyBannerHtml() {
+                    const bannerHtml = `<div style="text-align:center; margin:25px auto; padding:20px; max-width:550px; background-color:#f8fafc; border:1px solid #e2e8f0; border-radius:16px; font-family:'Malgun Gothic',sans-serif; box-shadow:0 4px 15px rgba(0,0,0,0.05);">
+  <h3 style="margin:0 0 8px 0; font-size:18px; color:#1e1b4b; font-weight:800; letter-spacing:-0.5px;">🏡 [아정청 공식] 아파트 체감 분양가 계산기</h3>
+  <p style="margin:0 0 16px 0; font-size:13px; color:#64748b;">겉보기 분양가에 숨겨진 진짜 취득원가와 금융이자, 취득세를 한눈에 시뮬레이션 하세요!</p>
+  <a href="${this.appUrl}" target="_blank" style="display:inline-block; padding:12px 30px; background-color:#4f46e5; color:#ffffff; font-weight:bold; font-size:14px; text-decoration:none; border-radius:30px; box-shadow:0 4px 10px rgba(79,70,229,0.3);">👉 실시간 분양가 두드려보기 (클릭)</a>
+</div>`;
+                    this.executeCopy(bannerHtml);
+                    this.showToast('카페 본문용 배너 HTML 복사 성공', '카페 게시글 작성 시 HTML 모드로 붙여넣으실 수 있는 배너코드가 복사되었습니다.');
+                },
+
+                // Internal fallback safe copy method
+                executeCopy(text) {
+                    const textarea = document.createElement('textarea');
+                    textarea.value = text;
+                    textarea.setAttribute('readonly', '');
+                    textarea.style.position = 'absolute';
+                    textarea.style.left = '-9999px';
+                    document.body.appendChild(textarea);
+                    textarea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textarea);
+                },
+
+                // Korean currency units helper
+                formatKoreanWon(val) {
+                    if (!val || isNaN(val)) return '0원';
+                    const units = ['', '만', '억', '조'];
+                    let result = [];
+                    let num = Math.floor(val);
+                    
+                    let i = 0;
+                    while (num > 0) {
+                        let mod = num % 10000;
+                        if (mod > 0) {
+                            result.unshift(this.formatNumber(mod) + units[i]);
+                        }
+                        num = Math.floor(num / 10000);
+                        i++;
+                    }
+                    return result.join(' ') + ' 원';
+                },
+
+                formatNumber(val) {
+                    if (val === undefined || val === null) return '0';
+                    return val.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+                },
+
+                // Custom notification toast
+                showToast(title, msg) {
+                    this.toastTitle = title;
+                    this.toastMsg = msg;
+                    this.toastShow = true;
+                    setTimeout(() => {
+                        this.toastShow = false;
+                    }, 4500);
+                }
+            }
+        }
+    </script>
+
+    <!-- Alpine.js -->
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Google Fonts (Noto Sans KR) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="h-full text-slate-800" x-data="calcApp()">
+
+    <div class="min-h-full flex flex-col">
+        <!-- Header -->
+        <header class="bg-gradient-to-r from-slate-900 to-indigo-950 text-white shadow-md">
+            <div class="max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="p-2.5 bg-indigo-500/20 rounded-xl border border-indigo-500/30">
+                        <i class="fa-solid fa-hotel text-2xl text-indigo-400"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-black tracking-tight flex items-center gap-2">
+                            아정청
+                            <span class="text-xs bg-indigo-500 text-white font-medium px-2 py-0.5 rounded-full">아파트 정직한 청약</span>
+                        </h1>
+                        <p class="text-xs text-slate-400">체감 총 분양가 계산기 및 취득 원가 분석 시스템</p>
+                    </div>
+                </div>
+                <div class="text-xs text-slate-400 bg-slate-800/40 px-3.5 py-1.5 rounded-lg border border-slate-700/50">
+                    <i class="fa-solid fa-shield-halved text-emerald-400 mr-1"></i> 공식 안심 계산 제휴용
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                
+                <!-- Left: Inputs (2 Columns wide on large screens) -->
+                <div class="lg:col-span-2 space-y-6">
+                    
+                    <!-- 1. 기본 정보 -->
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                        <div class="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+                            <span class="w-1.5 h-5 bg-indigo-600 rounded-full"></span>
+                            <h3 class="text-base font-bold text-slate-900">1. 기본 분양 정보</h3>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">단지 및 평형명</label>
+                                <input type="text" x-model="aptName" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">전용면적 구분</label>
+                                <select x-model="sizeType" @change="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                                    <option value="under85">85㎡ 이하 (농어촌특별세 비과세)</option>
+                                    <option value="over85">85㎡ 초과 (농어촌특별세 0.2% 과세)</option>
+                                </select>
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">기본 공급 분양가 (원)</label>
+                                <div class="relative">
+                                    <input type="number" x-model.number="basicPrice" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-12 py-3 text-lg font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">원</span>
+                                </div>
+                                <div class="mt-1 text-right text-xs text-indigo-600 font-bold" x-text="formatKoreanWon(basicPrice)"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. 필수/선택 발코니 및 옵션 비용 -->
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                        <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                            <div class="flex items-center gap-2">
+                                <span class="w-1.5 h-5 bg-indigo-600 rounded-full"></span>
+                                <h3 class="text-base font-bold text-slate-900">2. 발코니 확장 및 추가 옵션</h3>
+                            </div>
+                            <button @click="resetOptions()" class="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1">
+                                <i class="fa-solid fa-rotate-left"></i> 옵션 초기화
+                            </button>
+                        </div>
+                        
+                        <div class="space-y-4">
+                            <!-- 발코니 확장 -->
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                                <div class="sm:col-span-1 flex items-center gap-2">
+                                    <span class="p-1.5 bg-sky-50 text-sky-600 rounded-lg text-xs"><i class="fa-solid fa-house-laptop"></i></span>
+                                    <span class="text-sm font-semibold text-slate-700">발코니 확장비</span>
+                                </div>
+                                <div class="sm:col-span-2 relative">
+                                    <input type="number" x-model.number="balconyPrice" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-12 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+                                </div>
+                            </div>
+
+                            <!-- 시스템 에어컨 -->
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                                <div class="sm:col-span-1 flex items-center gap-2">
+                                    <span class="p-1.5 bg-teal-50 text-teal-600 rounded-lg text-xs"><i class="fa-solid fa-wind"></i></span>
+                                    <span class="text-sm font-semibold text-slate-700">시스템 에어컨</span>
+                                </div>
+                                <div class="sm:col-span-2 relative">
+                                    <input type="number" x-model.number="airconPrice" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-12 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+                                </div>
+                            </div>
+
+                            <!-- 빌트인 가전 -->
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                                <div class="sm:col-span-1 flex items-center gap-2">
+                                    <span class="p-1.5 bg-orange-50 text-orange-600 rounded-lg text-xs"><i class="fa-solid fa-kitchen-set"></i></span>
+                                    <span class="text-sm font-semibold text-slate-700">빌트인 가전 옵션</span>
+                                </div>
+                                <div class="sm:col-span-2 relative">
+                                    <input type="number" x-model.number="appliancePrice" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-12 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+                                </div>
+                            </div>
+
+                            <!-- 프리미엄 인테리어 -->
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                                <div class="sm:col-span-1 flex items-center gap-2">
+                                    <span class="p-1.5 bg-amber-50 text-amber-600 rounded-lg text-xs"><i class="fa-solid fa-couch"></i></span>
+                                    <span class="text-sm font-semibold text-slate-700">인테리어/마감재</span>
+                                </div>
+                                <div class="sm:col-span-2 relative">
+                                    <input type="number" x-model.number="interiorPrice" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-12 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">원</span>
+                                </div>
+                            </div>
+
+                            <!-- 기타 커스텀 옵션 추가 -->
+                            <div class="pt-2 border-t border-dashed border-slate-100">
+                                <div class="flex justify-between items-center mb-2">
+                                    <label class="text-xs font-bold text-slate-400">나만의 추가 옵션 등록</label>
+                                    <button @click="addCustomOption()" class="text-xs text-indigo-600 font-bold hover:text-indigo-800 flex items-center gap-1">
+                                        <i class="fa-solid fa-plus"></i> 항목 추가
+                                    </button>
+                                </div>
+                                <template x-for="(opt, index) in customOptions" :key="index">
+                                    <div class="grid grid-cols-12 gap-2 mt-2 items-center">
+                                        <input type="text" x-model="opt.name" placeholder="옵션명 (예: 중문)" class="col-span-5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-medium focus:outline-none">
+                                        <div class="col-span-5 relative">
+                                            <input type="number" x-model.number="opt.price" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-3 pr-8 py-1.5 text-xs font-bold focus:outline-none">
+                                            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">원</span>
+                                        </div>
+                                        <button @click="removeCustomOption(index)" class="col-span-2 text-xs text-red-500 hover:text-red-700 font-bold p-1">
+                                            삭제
+                                        </button>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. 대출 금융 비용 및 후불제 이자 -->
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                        <div class="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+                            <span class="w-1.5 h-5 bg-indigo-600 rounded-full"></span>
+                            <h3 class="text-base font-bold text-slate-900">3. 금융 비용 (중도금 대출)</h3>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">중도금 대출 금리 구분</label>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button @click="interestType = 'free'; calcAll()" :class="interestType === 'free' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'" class="py-2 px-3 text-xs font-bold rounded-xl transition">
+                                        무이자 대출
+                                    </button>
+                                    <button @click="interestType = 'later'; calcAll()" :class="interestType === 'later' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'" class="py-2 px-3 text-xs font-bold rounded-xl transition">
+                                        이자가산 (후불제)
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div x-show="interestType === 'later'" x-transition>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">대출 평균 예상 금리 (%)</label>
+                                <div class="relative">
+                                    <input type="number" step="0.1" x-model.number="interestRate" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-4 pr-12 py-2.5 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition">
+                                    <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">%</span>
+                                </div>
+                            </div>
+
+                            <div x-show="interestType === 'later'" class="sm:col-span-2 bg-slate-50 rounded-xl p-4 border border-slate-100">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-xs font-bold text-slate-500">중도금 실행 정보 (일반 60% 대출 기준)</span>
+                                    <span class="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-bold">누적 계산 적용</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 mb-1">총 대출 기간 (월)</label>
+                                        <input type="number" x-model.number="loanMonths" @input="calcAll()" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-bold">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-slate-400 mb-1">대출 보증 수수료율 (%)</label>
+                                        <input type="number" step="0.01" x-model.number="guaranteeFeeRate" @input="calcAll()" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-bold">
+                                    </div>
+                                </div>
+                                <p class="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                                    ※ 중도금 대출은 이자 회차별로 잔액이 누적되어 단리로 부과되는 '후불제' 시뮬레이션 공식을 적용합니다. (6회 분할 실행 가정)
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. 취득세 및 부대비용 -->
+                    <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                        <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+                            <div class="flex items-center gap-2">
+                                <span class="w-1.5 h-5 bg-indigo-600 rounded-full"></span>
+                                <h3 class="text-base font-bold text-slate-900">4. 세금 및 부대비용 (자동 시뮬레이션)</h3>
+                            </div>
+                            <span class="text-[11px] text-indigo-600 font-bold">취득 가액 연동</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <!-- 취득세 결과 -->
+                            <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-xs font-semibold text-slate-500">예상 취득세율 (지방세포함)</span>
+                                    <span class="text-sm font-bold text-indigo-600" x-text="taxRate + '%'"></span>
+                                </div>
+                                <div class="flex justify-between items-center mt-2">
+                                    <span class="text-xs font-semibold text-slate-500">취득세 총액</span>
+                                    <span class="text-sm font-bold text-slate-900" x-text="formatNumber(taxAmount) + ' 원'"></span>
+                                </div>
+                                <p class="text-[9px] text-slate-400 mt-2">※ 분양가+옵션 비용 합산 기준 취득세율 자동 매칭</p>
+                            </div>
+
+                            <!-- 기타 부대 비용 -->
+                            <div class="space-y-2">
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 font-medium">정부 수입인지세</span>
+                                    <span class="font-bold text-slate-800" x-text="formatNumber(stampDuty) + ' 원'"></span>
+                                </div>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 font-medium">국민주택채권 할인비용 (예상)</span>
+                                    <span class="font-bold text-slate-800" x-text="formatNumber(bondFee) + ' 원'"></span>
+                                </div>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 font-medium">등기 대행 및 법무 수수료</span>
+                                    <div class="relative w-28">
+                                        <input type="number" x-model.number="legalFee" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-lg pl-2 pr-5 py-0.5 text-xs font-bold text-right">
+                                        <span class="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">원</span>
+                                    </div>
+                                </div>
+                                <div class="flex justify-between items-center text-xs">
+                                    <span class="text-slate-500 font-medium">입주예정자협의회 회비 등</span>
+                                    <div class="relative w-28">
+                                        <input type="number" x-model.number="aptUnionFee" @input="calcAll()" class="w-full bg-slate-50 border border-slate-200 rounded-lg pl-2 pr-5 py-0.5 text-xs font-bold text-right">
+                                        <span class="absolute right-1 top-1/2 -translate-y-1/2 text-[10px] text-slate-400">원</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ⭐ GEMINI AI REAL-TIME ANALYSIS REPORT (제미나이 인텔리전스 리포트 엔진) -->
+                    <div class="bg-gradient-to-br from-indigo-50 via-slate-50 to-emerald-50 rounded-2xl p-6 shadow-sm border border-indigo-100">
+                        <div class="flex items-center justify-between mb-4 pb-3 border-b border-indigo-100/50">
+                            <div class="flex items-center gap-2">
+                                <span class="p-1.5 bg-indigo-600 text-white rounded-lg text-xs animate-pulse"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                                <h3 class="text-base font-black text-slate-900">아정청 AI 부동산 정밀 진단</h3>
+                            </div>
+                            <span class="text-[10px] text-indigo-700 font-bold bg-indigo-100 px-2.5 py-1 rounded-full uppercase tracking-wider">Powered by Gemini 2.5 Flash</span>
+                        </div>
+
+                        <!-- Initial action call -->
+                        <div x-show="!aiLoading && !aiResponse" class="text-center py-6">
+                            <p class="text-xs text-slate-500 font-medium leading-relaxed mb-4">
+                                현재 계산된 분양가, 이자, 부대비용 및 납입 흐름 데이터를 토대로<br>
+                                **제미나이 AI 부동산 닥터**가 자금 조달 안정성과 리스크 요소를 정밀하게 자문해 드립니다.
+                            </p>
+                            <button @click="getAiAnalysis()" class="px-6 py-3 bg-gradient-to-r from-indigo-600 to-indigo-800 hover:opacity-90 text-xs font-black text-white rounded-full shadow-lg shadow-indigo-600/20 transition flex items-center gap-2 mx-auto">
+                                <i class="fa-solid fa-brain"></i> 실시간 AI 정밀 진단 보고서 생성하기
+                            </button>
+                        </div>
+
+                        <!-- Loading Shimmer State -->
+                        <div x-show="aiLoading" class="space-y-4 py-4" x-transition>
+                            <div class="flex items-center gap-3 text-xs text-indigo-600 font-bold justify-center">
+                                <span class="animate-spin text-lg"><i class="fa-solid fa-spinner"></i></span>
+                                <span>아정청 AI가 분양가 데이터를 바탕으로 자금 적정성 시뮬레이션을 분석하는 중입니다...</span>
+                            </div>
+                            <div class="space-y-2.5">
+                                <div class="h-3.5 bg-slate-200/60 rounded-full w-full animate-pulse"></div>
+                                <div class="h-3.5 bg-slate-200/60 rounded-full w-11/12 animate-pulse"></div>
+                                <div class="h-3.5 bg-slate-200/60 rounded-full w-10/12 animate-pulse"></div>
+                                <div class="h-3.5 bg-slate-200/60 rounded-full w-8/12 animate-pulse"></div>
+                            </div>
+                        </div>
+
+                        <!-- Error State -->
+                        <div x-show="aiError" class="p-4 bg-rose-50 border border-rose-100 rounded-xl text-xs text-rose-700 font-medium" x-html="formatMarkdown(aiError)"></div>
+
+                        <!-- Generated Content Display -->
+                        <div x-show="aiResponse" class="space-y-4" x-transition>
+                            <div class="bg-white rounded-xl p-5 border border-indigo-100/50 shadow-sm max-h-[450px] overflow-y-auto">
+                                <div class="prose text-xs text-slate-700 leading-relaxed space-y-2" x-html="formatMarkdown(aiResponse)"></div>
+                            </div>
+                            
+                            <div class="flex justify-end gap-2">
+                                <button @click="getAiAnalysis()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-[11px] font-bold text-slate-600 rounded-lg transition">
+                                    <i class="fa-solid fa-arrows-rotate"></i> 다시 분석하기
+                                </button>
+                                <button @click="executeCopy(aiResponse); showToast('AI 자문 복사 성공', '진단 결과 텍스트가 복사되었습니다. 네이버 카페 게시판에 바로 올려보세요!');" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-[11px] font-bold text-white rounded-lg transition">
+                                    <i class="fa-solid fa-paste"></i> AI 진단 텍스트 전체 복사
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Right: Dashboard & Summary (Sticky on desktop) -->
+                <div class="space-y-6">
+                    <div class="sticky top-6 space-y-6">
+                        
+                        <!-- Real-time Dashboard Summary Box -->
+                        <div class="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-950 text-white rounded-3xl p-6 shadow-xl border border-indigo-500/20 relative overflow-hidden">
+                            <!-- Background decoration -->
+                            <div class="absolute -right-12 -bottom-12 w-40 h-40 bg-indigo-500/10 rounded-full blur-2xl"></div>
+                            
+                            <div class="relative">
+                                <span class="text-[10px] font-bold text-indigo-400 bg-indigo-500/20 border border-indigo-400/30 px-2 py-0.5 rounded-full uppercase tracking-wider">REAL FEEL COST SUMMARY</span>
+                                
+                                <div class="mt-4">
+                                    <p class="text-xs text-slate-400 font-medium">진짜 내가 치러야 할</p>
+                                    <h2 class="text-2xl font-black text-white mt-1" x-text="aptName">단지 분석 결과</h2>
+                                </div>
+
+                                <div class="mt-6 space-y-4">
+                                    <div>
+                                        <p class="text-xs text-slate-400">1. 공급 분양가 (기준선)</p>
+                                        <p class="text-lg font-bold text-slate-200" x-text="formatNumber(basicPrice) + ' 원'"></p>
+                                    </div>
+                                    
+                                    <div class="pt-3 border-t border-slate-800 flex justify-between items-center">
+                                        <div>
+                                            <p class="text-xs text-slate-400">2. 추가 옵션 & 금융 & 세금 총액</p>
+                                            <p class="text-sm font-bold text-rose-400" x-text="'+ ' + formatNumber(extraTotalCost) + ' 원'"></p>
+                                        </div>
+                                        <span class="text-xs bg-rose-500/20 text-rose-300 font-bold px-2 py-1 rounded border border-rose-500/30" x-text="extraPercentage + '% 증가'"></span>
+                                    </div>
+
+                                    <div class="pt-4 border-t border-indigo-500/40">
+                                        <p class="text-xs text-indigo-300 font-bold">최종 체감 총 분양가 (총 취득 원가)</p>
+                                        <p class="text-3xl font-black text-yellow-300 mt-1" x-text="formatNumber(realTotalCost) + ' 원'"></p>
+                                        <p class="text-xs text-yellow-400/80 font-medium mt-1" x-text="formatKoreanWon(realTotalCost)"></p>
+                                    </div>
+                                </div>
+
+                                <!-- Progress Bar Visualization -->
+                                <div class="mt-6">
+                                    <div class="flex justify-between text-[10px] text-slate-400 mb-1">
+                                        <span>공급분양가 비율</span>
+                                        <span>추가 비용 비율</span>
+                                    </div>
+                                    <div class="w-full h-3 bg-slate-800 rounded-full overflow-hidden flex">
+                                        <div :style="'width: ' + (100 - parseFloat(extraPercentage)) + '%'" class="bg-indigo-500 h-full transition-all duration-500"></div>
+                                        <div :style="'width: ' + extraPercentage + '%'" class="bg-rose-500 h-full transition-all duration-500"></div>
+                                    </div>
+                                    <div class="flex justify-between text-[10px] text-slate-400 mt-1">
+                                        <span x-text="(100 - parseFloat(extraPercentage)).toFixed(1) + '%'"></span>
+                                        <span x-text="extraPercentage + '%'"></span>
+                                    </div>
+                                </div>
+
+                                <!-- User Copy To Cafe & Local PDF/Excel Export Actions -->
+                                <div class="mt-6 space-y-2">
+                                    <button @click="copyForNaverCafe()" class="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-sm font-bold rounded-xl text-white transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/20">
+                                        <i class="fa-solid fa-copy"></i> 네이버 카페에 계산 결과 공유하기
+                                    </button>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <button @click="exportCSV()" class="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-xs font-bold rounded-xl text-slate-200 transition border border-slate-700 flex items-center justify-center gap-1.5">
+                                            <i class="fa-solid fa-file-excel text-green-500"></i> Excel 저장
+                                        </button>
+                                        <button @click="window.print()" class="py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 text-xs font-bold rounded-xl text-white transition flex items-center justify-center gap-1.5">
+                                            <i class="fa-solid fa-print"></i> 보고서 인쇄
+                                        </button>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+
+                        <!-- Cashflow stage planner -->
+                        <div class="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
+                            <div class="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
+                                <span class="w-1.5 h-5 bg-teal-600 rounded-full"></span>
+                                <h3 class="text-sm font-bold text-slate-900">단계별 현금 조달 시뮬레이션</h3>
+                            </div>
+                            
+                            <div class="space-y-4">
+                                <div class="flex justify-between text-xs font-semibold text-slate-500 mb-2">
+                                    <span>일반 분양 일정별 납입 기준</span>
+                                    <span class="text-indigo-600">계약금 10% / 잔금 30% 기준</span>
+                                </div>
+
+                                <!-- 1단계 계약금 -->
+                                <div class="bg-slate-50 rounded-xl p-3 border-l-4 border-indigo-500">
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-xs font-bold text-slate-700">1. 계약금 단계 (당첨 직후)</span>
+                                        <span class="text-xs font-black text-slate-900" x-text="formatNumber(contractCash) + ' 원'"></span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-400 mt-1">※ 계약금 10% + 확장비/옵션 계약금 10%</p>
+                                </div>
+
+                                <!-- 2단계 중도금 -->
+                                <div class="bg-slate-50 rounded-xl p-3 border-l-4 border-amber-500">
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-xs font-bold text-slate-700">2. 중도금 단계 (대출 대체 가능)</span>
+                                        <span class="text-xs font-black text-slate-900" x-text="formatNumber(middleCash) + ' 원'"></span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-400 mt-1">※ 60% 대출 무사 실행 가정 시 이자후불제 비용만 누적</p>
+                                </div>
+
+                                <!-- 3단계 잔금 및 입주 -->
+                                <div class="bg-slate-50 rounded-xl p-3 border-l-4 border-teal-500">
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-xs font-bold text-slate-700">3. 입주/잔금 단계 (최종 정산)</span>
+                                        <span class="text-xs font-black text-slate-900" x-text="formatNumber(remainingCash) + ' 원'"></span>
+                                    </div>
+                                    <p class="text-[10px] text-slate-400 mt-1">※ 분양잔금 30% + 옵션 90% + 후불이자 + 세금/부대비용</p>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </div>
+        </main>
+
+        <!-- Custom Notification Toast Modal -->
+        <div x-show="toastShow" 
+             x-transition:enter="transition ease-out duration-300"
+             x-transition:enter-start="opacity-0 transform translate-y-2"
+             x-transition:enter-end="opacity-100 transform translate-y-0"
+             x-transition:leave="transition ease-in duration-200"
+             x-transition:leave-start="opacity-100 transform translate-y-0"
+             x-transition:leave-end="opacity-0 transform translate-y-2"
+             class="fixed bottom-5 right-5 bg-slate-950 text-white px-5 py-3.5 rounded-2xl shadow-2xl border border-indigo-500/20 flex items-center gap-3 z-50 max-w-sm">
+            <span class="text-emerald-400"><i class="fa-solid fa-circle-check text-lg"></i></span>
+            <div>
+                <p class="text-xs font-bold" x-text="toastTitle">알림</p>
+                <p class="text-[10px] text-slate-400 mt-0.5 leading-relaxed" x-text="toastMsg"></p>
+            </div>
+        </div>
+
+        <!-- Hidden/Popup Admin Settings Modal (⚙️ Only Accessible to the Cafe Manager) -->
+        <div x-show="adminOpen" class="fixed inset-0 z-50 overflow-y-auto" style="display: none;" x-transition>
+            <!-- Backdrop -->
+            <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" @click="adminOpen = false"></div>
+            
+            <!-- Modal Body -->
+            <div class="relative min-h-screen flex items-center justify-center p-4">
+                <div class="relative bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 space-y-5">
+                    <!-- Modal Header -->
+                    <div class="flex justify-between items-center pb-3 border-b border-slate-100">
+                        <div class="flex items-center gap-2">
+                            <span class="p-1.5 bg-slate-100 text-slate-700 rounded-lg text-xs"><i class="fa-solid fa-screwdriver-wrench"></i></span>
+                            <h3 class="text-base font-bold text-slate-900">아정청 계산기 관리자 설정</h3>
+                        </div>
+                        <button @click="adminOpen = false" class="text-slate-400 hover:text-slate-600">
+                            <i class="fa-solid fa-xmark text-lg"></i>
+                        </button>
+                    </div>
+
+                    <p class="text-xs text-slate-500 leading-relaxed">
+                        ※ 이 설정 화면은 일반 회원들에게 노출되지 않으며, 푸터 영역 우측의 비밀 버튼을 클릭한 지기님만 볼 수 있는 은밀한 관리용 창입니다.
+                    </p>
+
+                    <!-- API Key Settings -->
+                    <div class="space-y-2">
+                        <label class="block text-[10px] font-black text-indigo-900 uppercase tracking-wider">
+                            🔑 제미나이(Gemini) API 개인 키 설정
+                        </label>
+                        <input type="password" x-model="customApiKey" placeholder="여기에 구글 AI API Key를 입력하세요" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono">
+                        <p class="text-[9px] text-slate-400 leading-normal">
+                            외부 웹호스팅 서버나 카페 위젯으로 배포했을 때도 AI 정밀 진단 기능이 무사히 작동하도록 하려면 <a href="https://aistudio.google.com/" target="_blank" class="text-indigo-600 font-bold underline">구글 AI 스튜디오</a>에서 발급받은 무료 API 키를 이 곳에 넣고 저장하세요.
+                        </p>
+                    </div>
+
+                    <!-- App URL Settings -->
+                    <div class="space-y-2">
+                        <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            내 계산기가 설치된 실제 호스팅 웹 주소(URL)
+                        </label>
+                        <input type="url" x-model="appUrl" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                    </div>
+
+                    <!-- Cafe Deploy Codes -->
+                    <div class="space-y-2 pt-2 border-t border-slate-100">
+                        <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">카페 전파용 원스톱 코드 복사</span>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button @click="copyIframeCode()" class="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700 rounded-xl transition flex items-center justify-center gap-1.5">
+                                <i class="fa-solid fa-code"></i> 위젯용 Iframe 복사
+                            </button>
+                            <button @click="copyBannerHtml()" class="py-2.5 px-3 bg-indigo-50 hover:bg-indigo-100 text-xs font-bold text-indigo-700 rounded-xl transition flex items-center justify-center gap-1.5">
+                                <i class="fa-solid fa-rectangle-ad"></i> 글 배너 HTML 복사
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Close Button -->
+                    <div class="pt-3 border-t border-slate-100 text-right">
+                        <button @click="adminOpen = false" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-xs font-bold text-white rounded-xl transition">
+                            설정 완료 및 닫기
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="bg-white border-t border-slate-200 py-6 mt-12">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+                <span class="text-xs text-slate-400">© 2026 아정청 (아파트 정직한 청약). All rights reserved.</span>
+                <!-- Subtle Admin Trigger (Only visible/known to Cafe Admin) -->
+                <button @click="adminOpen = true" class="text-xs text-slate-300 hover:text-slate-500 transition flex items-center gap-1">
+                    <i class="fa-solid fa-gear"></i> 관리자 설정
+                </button>
+            </div>
+        </footer>
+    </div>
+
+</body>
+</html>
